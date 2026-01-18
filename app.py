@@ -20,7 +20,9 @@ model = load_model()
 @st.cache_data
 def load_cloud_data():
     try:
-        s3 = boto3.client('s3')
+        s3 = boto3.client('s3',
+                  aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
+                  aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"])
         bucket_name = 'aether-project-data'  # UPDATE IF NEEDED
         file_key = 'telemetry_batch_1.csv'
         
@@ -203,3 +205,4 @@ if st.button("📄 Generate Official PDF Report"):
                 mime="application/pdf"
 
             )
+
