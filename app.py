@@ -3,7 +3,6 @@ import pandas as pd
 import joblib
 import boto3
 import io
-import winsound
 from fpdf import FPDF
 import datetime
 
@@ -66,7 +65,7 @@ if prediction == 1:
         st.warning("Siren Active: Playing Warning Sound...")
         # Play a 'Beep...Beep...Beep' sound
         # Frequency: 1000Hz, Duration: 500ms
-        winsound.Beep(1000, 500) 
+        #winsound.Beep(1000, 500) 
 else:
     st.success(f"✅ SYSTEM NOMINAL (Confidence: {(1-probability)*100:.1f}%)")
     
@@ -202,4 +201,5 @@ if st.button("📄 Generate Official PDF Report"):
                 data=f,
                 file_name=pdf_file,
                 mime="application/pdf"
+
             )
