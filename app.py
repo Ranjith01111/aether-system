@@ -1,209 +1,196 @@
 import streamlit as st
 import pandas as pd
-import joblib
+import numpy as np
 import boto3
 import io
-from fpdf import FPDF
 import datetime
+from fpdf import FPDF
+import joblib
+from tensorflow.keras.models import load_model
+import plotly.express as px
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AETHER Mission Control", page_icon="🚀", layout="wide")
+# --- CONFIGURATION ---
+# UPDATE THIS TO YOUR WORKING BUCKET NAME
+BUCKET_NAME = 'aether-project-data' 
+FILE_KEY = 'live_data.csv'
 
-# --- LOAD THE AI BRAIN ---
-@st.cache_resource
-def load_model():
-    return joblib.load('aether_brain_model.pkl')
+# --- PAGE SETUP ---
+st.set_page_config(page_title="AETHER MASTER", page_icon="🚀", layout="wide")
+st.title("🚀 AETHER SYSTEM - MISSION CONTROL")
+st.markdown("### Integrated: Live Cloud Telemetry & Deep Learning AI")
 
-model = load_model()
-
-# --- LOAD DATA FROM AWS S3 ---
-@st.cache_data
-def load_cloud_data():
+# --- SECTION 1: LIVE DATA FEED (CLOUD) ---
+@st.cache_data(ttl=10)  # Refreshes every 10 seconds automatically
+def load_live_data():
     try:
-        s3 = boto3.client('s3',
-                  aws_access_key_id=st.secrets["AWS_ACCESS_KEY_ID"],
-                  aws_secret_access_key=st.secrets["AWS_SECRET_ACCESS_KEY"],region_name = 'ap-south-2')
-        bucket_name = 'aether-project-data'  # UPDATE IF NEEDED
-        file_key = 'telemetry_batch_1.csv'
-        
-        response = s3.get_object(Bucket=bucket_name, Key=file_key)
-        df = pd.read_csv(io.BytesIO(response['Body'].read()))
+        s3 = boto3.client('s3', region_name='ap-south-2')
+        response = s3.get_object(Bucket=BUCKET_NAME, Key=FILE_KEY)
+        df = pd.read_csv(response['Body'])
         return df
     except Exception as e:
-        st.error(f"Error connecting to Cloud: {e}")
         return pd.DataFrame()
 
-# --- DASHBOARD CONTENT ---
-st.title("🚀 AETHER System - Real-time Telemetry")
+# --- SECTION 2: AI BRAIN (LSTM) ---
+@st.cache_resource
+def load_ai_brain():
+    try:
+        model = load_model('aether_brain_v2.h5')
+        scaler = joblib.load('scaler.pkl')
+        return model, scaler
+    except:
+        return None, None
 
-st.sidebar.header("Live Controls")
-temp = st.sidebar.slider("Engine Temp (°C)", 80.0, 130.0, 100.0)
-vib = st.sidebar.slider("Vibration (Hz)", 40.0, 70.0, 50.0)
-fuel = st.sidebar.slider("Fuel (%)", 0.0, 100.0, 75.0)
-
-# --- MANUAL PREDICTION ---
-input_data = pd.DataFrame({
-    'Temperature': [temp],
-    'Vibration': [vib],
-    'Fuel': [fuel]
-})
-
-prediction = model.predict(input_data)[0]
-probability = model.predict_proba(input_data)[0][1]
-
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Temperature", f"{temp} °C")
-col2.metric("Vibration", f"{vib} Hz")
-col3.metric("Fuel Level", f"{fuel}%")
-
-if prediction == 1:
-    st.error(f"⛔ CRITICAL FAILURE (Confidence: {probability*100:.1f}%)")
-    
-    # Add a checkbox to turn the siren on/off
-    enable_alarm = st.checkbox("🚨 ACTIVATE SIREN ALARM")
-    
-    if enable_alarm:
-        st.warning("Siren Active: Playing Warning Sound...")
-        # Play a 'Beep...Beep...Beep' sound
-        # Frequency: 1000Hz, Duration: 500ms
-        #winsound.Beep(1000, 500) 
-else:
-    st.success(f"✅ SYSTEM NOMINAL (Confidence: {(1-probability)*100:.1f}%)")
-    
-    
-# --- CLOUD DATA SECTION ---
-st.divider()
-st.subheader("🛰️ Historical Data Feed (Direct from AWS S3)")
-
-df_history = load_cloud_data()
-
-if not df_history.empty:
-    st.write(f"Showing last **{len(df_history)}** records retrieved from Cloud Storage:")
-    st.dataframe(df_history) # This shows the actual data from Step 4
-else:
-    st.warning("No historical data found in the bucket.")
-
-# Telemetry Trend Analysis Section 
-
-st.divider()
-st.subheader("📉 Telemetry Trend Analysis (Live Graph)")
-
-# We will plot the Temperature history from the S3 data
-if not df_history.empty:
-    # Plotly creates interactive, zoomable charts (very professional)
-    import plotly.express as px
-    
-    # Create a 'Time' axis just for visualization (0, 1, 2, 3...)
-    df_plot = df_history.head(50).copy() # Show last 50 records
-    df_plot['Time_Sequence'] = range(len(df_plot))
-    
-    # Draw the chart
-    fig = px.line(df_plot, x='Time_Sequence', y='Temperature_C', 
-                  title='Engine Temperature Trend (Last 50 Readings)',
-                  labels={'Temperature_C': 'Temp (°C)', 'Time_Sequence': 'Time Sequence'},
-                  markers=True)
-    
-    # Update look to look like NASA style (dark background)
-    fig.update_layout(template="plotly_dark")
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.info("Smacky Tip: Hover over the graph to see exact values. Notice the 'spikes' - those are potential anomalies.")
-
-else:
-    st.warning("No data available to graph.")
-
-#Cloud Auditor Section
-
-st.divider()
-st.subheader("🔍 Automated Cloud Auditor")
-
-# Button to trigger the audit
-if st.button("Run Full System Diagnostic Audit"):
-    if not df_history.empty:
-        st.info("Processing 1000+ records from Cloud Storage... Please wait.")
-        
-        # 1. PREPARE DATA FOR THE MODEL
-        # The model was trained on columns named 'Temperature', 'Vibration', 'Fuel'.
-        # But the S3 data has names like 'Temperature_C', 'Vibration_Hz'.
-        # We must rename them so the AI understands them.
-        audit_data = df_history[['Temperature_C', 'Vibration_Hz', 'Fuel_Level_%']].copy()
-        audit_data.columns = ['Temperature', 'Vibration', 'Fuel'] # Renaming for the AI
-        
-        # 2. RUN PREDICTIONS ON ALL ROWS
-        bulk_predictions = model.predict(audit_data)
-        
-        # 3. COUNT THE DANGERS
-        danger_count = sum(bulk_predictions)
-        safe_count = len(bulk_predictions) - danger_count
-        risk_percentage = (danger_count / len(bulk_predictions)) * 100
-        
-        # 4. DISPLAY RESULTS
-        col_a, col_b, col_c = st.columns(3)
-        col_a.metric("Total Records Analyzed", len(bulk_predictions))
-        col_b.metric("Critical Anomalies Detected", danger_count)
-        col_c.metric("System Risk Level", f"{risk_percentage:.1f}%")
-        
-        if risk_percentage > 5.0:
-            st.error("Smacky Warning: High Risk detected in historical data! Investigation required.")
-        else:
-            st.success("Smacky Report: Historical data is mostly Nominal. System is stable.")
-            
-    else:
-        st.warning("No data found to audit.")
-
-
-def generate_report(temp, vib, fuel, prediction, confidence):
+# --- SECTION 3: REPORTING ---
+def generate_report(live_temp, prediction):
     pdf = FPDF()
     pdf.add_page()
-    
-    # Set Title Font
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt="AETHER SYSTEM - INCIDENT REPORT", ln=True, align='C')
-    
-    # Set Normal Font
+    pdf.cell(200, 10, txt="AETHER MISSION REPORT", ln=True, align='C')
     pdf.set_font("Arial", '', 12)
-    
-    # Write Data
-    date_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    pdf.cell(200, 10, txt=f"Report Generated: {date_time}", ln=True, align='C')
+    pdf.cell(200, 10, txt=f"Timestamp: {datetime.datetime.now()}", ln=True, align='C')
     pdf.ln(10)
+    pdf.cell(200, 10, txt=f"Live Temperature: {live_temp} °C", ln=True)
+    pdf.cell(200, 10, txt=f"AI Predicted Next Step: {prediction:.2f} °C", ln=True)
+    filename = "Mission_Report.pdf"
+    pdf.output(filename)
+    return filename
+
+# --- DASHBOARD LAYOUT ---
+
+# 1. SIDEBAR (CONTROLS)
+st.sidebar.header("Control Center")
+
+# SIMULATOR CONTROLS (For AI)
+st.sidebar.subheader("AI Simulator Inputs")
+sim_temp = st.sidebar.slider("Simulate Engine Temp (°C)", 80.0, 150.0, 100.0)
+
+# 2. COLUMNS FOR METRICS
+col1, col2, col3 = st.columns(3)
+
+# COLUMN 1: LIVE CLOUD DATA
+df_live = load_live_data()
+if not df_live.empty:
+    live_temp_val = df_live['Temperature'][0]
+    col1.metric("Live Cloud Temp", f"{live_temp_val} °C")
+else:
+    col1.metric("Live Cloud Temp", "No Signal")
+
+# COLUMN 2: AI PREDICTION (SENTINEL MODE)
+model, scaler = load_ai_brain()
+
+# DECISION: Use Live Data if available, otherwise use Slider
+target_temp = 0.0
+source_name = ""
+
+if not df_live.empty and 'Temperature' in df_live.columns:
+    target_temp = df_live['Temperature'][0]
+    source_name = "LIVE CLOUD"
+else:
+    target_temp = sim_temp
+    source_name = "MANUAL SLIDER"
+
+col2.metric("Prediction Source", source_name)
+
+if model and scaler:
+    # Create a sequence ending at the TARGET_TEMP
+    # We simulate a "Recent History" so the AI has context
+    seq = np.linspace(target_temp - 5, target_temp, 60) 
     
-    pdf.cell(200, 10, txt="SENSOR READINGS:", ln=True)
-    pdf.cell(200, 10, txt=f"Engine Temperature: {temp} °C", ln=True)
-    pdf.cell(200, 10, txt=f"Vibration Freq: {vib} Hz", ln=True)
-    pdf.cell(200, 10, txt=f"Fuel Level: {fuel} %", ln=True)
-    pdf.ln(10)
+    seq_scaled = scaler.transform(seq.reshape(-1, 1))
+    seq_input = seq_scaled.reshape(1, 60, 1)
     
-    pdf.cell(200, 10, txt="AI ANALYSIS:", ln=True)
+    # Predict the future
+    pred_scaled = model.predict(seq_input, verbose=0)
+    pred_val = scaler.inverse_transform(pred_scaled)[0][0]
     
-    if prediction == 1:
-        pdf.set_text_color(255, 0, 0)
-        pdf.cell(200, 10, txt="STATUS: CRITICAL FAILURE DETECTED", ln=True)
-        pdf.cell(200, 10, txt="ACTION: Initiate Emergency Shutdown Protocol.", ln=True)
+    # Calculate Risk
+    if pred_val > target_temp:
+        trend_emoji = "🔺 RISING"
+        color = "normal"
     else:
-        pdf.set_text_color(0, 128, 0)
-        pdf.cell(200, 10, txt="STATUS: SYSTEM NOMINAL", ln=True)
-        pdf.cell(200, 10, txt="ACTION: Continue Monitoring.", ln=True)
+        trend_emoji = "🔻 STABLE"
+        color = "off"
         
-    pdf.set_text_color(0, 0, 0)
-    output_filename = "Mission_Report.pdf"
-    pdf.output(output_filename)
-    return output_filename
+    col2.metric(f"AI Predicted (Next 5s)", f"{pred_val:.2f} °C", f"{trend_emoji}")
+    
+    # AUTOMATED ALERT
+    if pred_val > 120.0: # DANGER THRESHOLD
+        st.error(f"🚨 SENTINEL ALERT: AI Predicts CRITICAL FAILURE ({pred_val:.1f}°C)")
+        # Winsound only works on Windows, won't crash cloud
+        import winsound
+        if source_name == "LIVE CLOUD":
+            try:
+                winsound.Beep(1000, 500) # Beep if running locally
+            except:
+                pass 
 
-# --- REPORT GENERATION SECTION ---
-st.markdown("---")
-if st.button("📄 Generate Official PDF Report"):
-    with st.spinner('Generating Report...'):
-        pdf_file = generate_report(temp, vib, fuel, prediction, probability*100)
+# 3. VISUALIZATION
+st.divider()
+c1, c2 = st.columns(2)
+
+# CHART 1: LIVE TELEMETRY TREND (SYNCHRONIZED)
+if not df_live.empty:
+    c1.subheader("📈 Telemetry Trend Analysis (Live Graph)")
+    
+    # Ensure we are using the simple names
+    # df_live MUST have columns: 'Time', 'Temperature', 'Vibration'
+    
+    fig = px.line(df_live, x='Time', y='Temperature', 
+                  title='Engine Temperature Trend (Last 50 Readings)',
+                  labels={'Temperature': 'Temp (°C)'},
+                  markers=True)
+    
+    fig.update_layout(
+        template="plotly_dark",
+        xaxis_title="Time Sequence",
+        yaxis_title="Temp (°C)"
+    )
+    
+    c1.plotly_chart(fig, use_container_width=True)
+    
+    with st.expander("View Raw Data"):
+        st.dataframe(df_live)
+else:
+    c1.warning("Waiting for Batch Data Packets...")
+
+# CHART 2: AI SIMULATION
+if model and scaler:
+    c2.subheader("🧠 AI Trend Simulation")
+    df_sim = pd.DataFrame({'Sequence': np.arange(1, 61), 'Temp': seq})
+    fig = px.line(df_sim, x='Sequence', y='Temp', 
+                  title=f'Input Trend (Ending at {sim_temp}°C)',
+                  markers=True)
+    fig.update_layout(template="plotly_dark")
+    c2.plotly_chart(fig, use_container_width=True)
+
+# 4. REPORTS
+st.divider()
+if st.button("📄 Generate Mission Report"):
+    if model:
+        pdf_file = generate_report(live_temp_val if not df_live.empty else 0, pred_val)
         with open(pdf_file, "rb") as f:
-            st.download_button(
-                label="Download PDF Document",
-                data=f,
-                file_name=pdf_file,
-                mime="application/pdf"
+            st.download_button(label="Download PDF", data=f, file_name=pdf_file, mime="application/pdf")
+    else:
+        st.warning("Brain must be online to generate report.")
 
-            )
-
-
+# --- FUTURE HORIZON GRAPH ---
+if model and scaler and (not df_live.empty):
+    st.subheader("🔮 Future Horizon (Next 5 Seconds)")
+    
+    # Create time axis
+    past_time = np.arange(-60, 0) # -60 to 0 seconds
+    future_time = np.array([5])   # +5 seconds
+    
+    # Combine for graph
+    df_horizon = pd.DataFrame({
+        'Time_Seconds': list(past_time) + list(future_time),
+        'Temperature_C': list(seq) + [pred_val],
+        'Type': ['History'] * 60 + ['Prediction']
+    })
+    
+    fig = px.line(df_horizon, x='Time_Seconds', y='Temperature_C',
+                  color='Type', line_dash='Type',
+                  title=f'Visualizing Past -> Future (Live: {target_temp:.1f}°C -> Pred: {pred_val:.1f}°C)',
+                  markers=True)
+    fig.update_layout(template="plotly_dark")
+    st.plotly_chart(fig, use_container_width=True)
