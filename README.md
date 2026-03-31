@@ -2,6 +2,8 @@
 
 **AETHER SYSTEM - MISSION CONTROL** is a Streamlit-based web application integrated with Live Cloud Telemetry and a Deep Learning AI Brain (LSTM model built with TensorFlow/Keras). It acts as a mission control dashboard to monitor engine temperatures, simulate telemetry, and predict critical failures in real-time.
 
+![Aether System Mission Control Dashboard](dashboard.png)
+
 ## Features
 
 * **Real-time Telemetry Dashboard**: Monitor historical and live engine temperature data. Visualizations are powered by Plotly.

@@ -77,15 +77,15 @@ def build_simulated_data(target_temp: float, points: int = 50) -> pd.DataFrame:
         spike = np.exp(-((phase - 0.72) ** 2) / 0.003) * (3.0 + normalized_temp * 2.5)
         wave = np.sin(phase * 5.5 * np.pi) * (2.0 + normalized_temp * 1.5) + spike
 
-    temperature = np.round(base_trend + wave, 2)
-    temperature[-1] = round(target_temp, 2)
-    vibration = 44 + normalized_temp * 18 + np.gradient(temperature) * 3.4 + np.cos(phase * 4 * np.pi) * 1.2
+    temperature_values = np.round(base_trend + wave, 2).astype(float).tolist()
+    temperature_values[-1] = round(target_temp, 2)
+    vibration_values = 44 + normalized_temp * 18 + np.gradient(temperature_values) * 3.4 + np.cos(phase * 4 * np.pi) * 1.2
 
     return pd.DataFrame(
         {
             "Time": times.strftime("%H:%M:%S"),
-            "Temperature": temperature,
-            "Vibration": np.round(np.clip(vibration, 35, 75), 2),
+            "Temperature": temperature_values,
+            "Vibration": np.round(np.clip(vibration_values, 35, 75), 2),
         }
     )
 
@@ -265,8 +265,10 @@ else:
 model = None
 scaler = None
 if enable_ai:
-    with st.spinner("Loading AI brain..."):
-        model, scaler = load_ai_brain()
+    ai_status = st.empty()
+    ai_status.info("Loading AI brain...")
+    model, scaler = load_ai_brain()
+    ai_status.empty()
 
 target_temp = live_temp_val if not df_live.empty else sim_temp
 col2.metric("Prediction Source", source_name)
